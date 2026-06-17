@@ -8,6 +8,7 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import { get, set, del } from "idb-keyval";
 import { useState } from "react";
+import { Toaster } from "sonner";
 
 // 永続化を効かせるため gcTime を永続化期間まで延ばす（デフォルト 5 分だと
 // IndexedDB に書く前に GC されてしまう）。
@@ -45,6 +46,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       persistOptions={{ persister, maxAge: PERSIST_MAX_AGE }}
     >
       {children}
+      <Toaster position="top-center" richColors />
     </PersistQueryClientProvider>
   );
 }
