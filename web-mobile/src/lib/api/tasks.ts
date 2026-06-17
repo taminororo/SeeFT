@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { apiGet } from "./client";
+import { apiGetList } from "./client";
 
 // GET /tasks → マニュアル一覧。Flutter 版 `api.getAllManual`。
-// ManualListPage は各要素の task（タスク名）と url（外部マニュアル）を使う。
+// 実レスポンスは多数フィールドを持つが、ManualListPage が使うのは task と url のみ。
+// Zod は余剰キーを strip するため、必要フィールドだけ宣言すればよい。
 const ManualSchema = z.object({
   task: z.string(),
   url: z.string(),
@@ -10,8 +11,6 @@ const ManualSchema = z.object({
 
 export type Manual = z.infer<typeof ManualSchema>;
 
-const ManualListSchema = z.array(ManualSchema);
-
 export async function getManuals(): Promise<Manual[]> {
-  return apiGet("/tasks", ManualListSchema);
+  return apiGetList("/tasks", ManualSchema);
 }

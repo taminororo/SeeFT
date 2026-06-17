@@ -34,6 +34,23 @@ export async function apiGet<S extends z.ZodType>(
 }
 
 /**
+ * GET でリストを取得する。
+ * 一部の Go エンドポイント（/rescues, /tasks/users/:id 等）は空のとき `null` を
+ * 返すため（AGENTS.md「一部 UseCase が nil を返す」既知問題）、null を [] に正規化する。
+ */
+export async function apiGetList<S extends z.ZodType>(
+  path: string,
+  itemSchema: S,
+): Promise<z.infer<S>[]> {
+  const res = await fetch(toUrl(path), { headers: JSON_HEADERS });
+  if (res.status !== 200) {
+    throw new ApiError(res.status, `GET ${path} に失敗しました (status: ${res.status})`);
+  }
+  const json = await res.json();
+  return z.array(itemSchema).parse(json ?? []);
+}
+
+/**
  * POST。Go API は成功時 201 を返す（rescue / review）。
  * schema を渡すとレスポンスを検証して返す。省略時は生の JSON を返す。
  */
