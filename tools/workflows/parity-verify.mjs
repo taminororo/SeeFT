@@ -2,6 +2,7 @@ export const meta = {
   name: 'parity-verify',
   description: 'web-mobile のパリティ検証テストを著作・実行（Flutter をオラクルに）',
   phases: [
+    { title: 'Precheck', detail: '既存テストが緑なら scaffold/author を短絡（再実行 fast-path）' },
     { title: 'Scaffold', detail: 'Vitest 設定・shift シード投入・seeded /shifts 確認' },
     { title: 'Author', detail: 'new-badge / badge-store / reviewed-store / schemas を並列著作' },
     { title: 'Verify', detail: 'vitest run、合否と parity gap を報告' },
@@ -168,6 +169,37 @@ const verifyPrompt = [
   'Parse the vitest summary. Return: the command, passed/failed/total test counts, a list of failures (name + concise message), and parityGaps — failures that indicate the Next.js implementation genuinely diverges from the Flutter oracle (as opposed to a test bug or a type error). Distinguish: a failing oracle-equivalence meta-test or a failing localStorage-key-name assertion is a real parity gap; a TypeScript/import error is a test-authoring bug (report under failures, not parityGaps). Include the last ~40 lines of raw output in rawTail. Do NOT fix anything — only report.',
 ].join('\n')
 
+// 再実行 fast-path（wf-improve 観測駆動の改善, issue #1）:
+// テストが既に存在し全緑なら、冪等な Scaffold と再著作 Author を短絡して即 return する。
+// 初回・環境リセット時（テスト未整備 or 赤）はフル実行にフォールバック。
+const PRECHECK_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    testsExist: { type: 'boolean' },
+    passed: { type: 'number' },
+    failed: { type: 'number' },
+    detail: { type: 'string' },
+  },
+  required: ['testsExist', 'passed', 'failed', 'detail'],
+}
+
+const precheckPrompt = [
+  '再実行 fast-path のための precheck。' + WEB + ' で既存テストの有無と合否のみを確認する。',
+  '次を実行: cd ' + WEB + ' && npm run test 2>&1',
+  '（npm run test は vitest run）。出力から判定する: testsExist（vitest がテストファイルを見つけたか。"No test files found" なら false）、passed（緑のテスト数）、failed（赤のテスト数）、detail（一行要約）。',
+  '著作や修正は一切しない。実行して報告するだけ。',
+].join('\n')
+
+phase('Precheck')
+log('既存テストの有無と合否を確認（再実行 fast-path 判定）')
+const precheck = await agent(precheckPrompt, { label: 'precheck', schema: PRECHECK_SCHEMA })
+if (precheck.testsExist && precheck.failed === 0 && precheck.passed > 0) {
+  log('テスト既存＆全緑（' + precheck.passed + '件）→ 再実行 fast-path: scaffold/author をスキップ')
+  return { fastPath: true, precheck }
+}
+log('テスト未整備 or 赤 → フル実行（scaffold→author→verify）')
+
 phase('Scaffold')
 log('Vitest 設定・shift シード投入・seeded /shifts 確認')
 const scaffold = await agent(scaffoldPrompt, { label: 'scaffold', schema: SCAFFOLD_SCHEMA })
@@ -185,4 +217,4 @@ phase('Verify')
 log('vitest run ＋ tsc で合否と parity gap を集計')
 const verify = await agent(verifyPrompt, { label: 'verify', schema: VERIFY_SCHEMA })
 
-return { scaffold, authored, verify }
+return { fastPath: false, precheck, scaffold, authored, verify }
