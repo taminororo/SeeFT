@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/*
+ * SeeFT デザイントークン。Flutter 版 `mobile/lib/theme/tokens.dart` の移植。
+ * Tailwind v4 の CSS-first テーマ。色・フォントサイズ・角丸・影を定義する。
+ * 生 hex の直書きは禁止（AGENTS.md の Flutter 規約を踏襲）し、必ずトークン経由で使う。
+ */
+@theme {
+  /* 色（AppColors） */
+  --color-base: #ffffff; /* 背景色 */
+  --color-main: #009688; /* メインカラー（ティール） */
+  --color-sub: #f3ae56; /* サブカラー（オレンジ） */
+  --color-error: #ba1a1a; /* エラー時の色 */
+  --color-white: #ffffff;
+  --color-gray-light: #d9d9d9; /* 明るい灰色 */
+  --color-gray-dark: #7b7b7b; /* 暗い灰色 */
+  --color-black: #000000;
+  --color-text-white: #ffffff;
+  --color-text-black: #000000;
+  --color-link: #1264a3; /* 青色のリンク */
+
+  /* ステータスバッジ色（rescue_response_tab.dart より） */
+  --color-status-done: #325c23; /* 対応済 */
+  --color-status-progress: #3a73e6; /* 対応中 */
+
+  /* フォントサイズ（AppFontSizes） */
+  --text-xs: 0.75rem; /* 12px 最小の文字 */
+  --text-sm: 0.875rem; /* 14px 小さい文字 */
+  --text-md: 1rem; /* 16px 標準の文字 */
+  --text-lg: 1.25rem; /* 20px 大きい文字 */
+
+  /* 角丸（AppBorderRadius） */
+  --radius-normal: 0.5rem; /* 8px 標準の角丸 */
+  --radius-pill: 100px; /* タップできる要素の角丸 */
+
+  /* フォント（CJK はシステムフォント優先で高速・確実に） */
+  --font-sans:
+    "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", Meiryo,
+    system-ui, sans-serif;
+
+  /* 影（AppShadows.medium） */
+  --shadow-card: 0 2px 2px rgba(0, 0, 0, 0.25), 2px 2px 4px rgba(0, 0, 0, 0.25);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  /* スマホ枠の外側を灰色にし、中身の白いカラムを際立たせる */
+  background-color: var(--color-gray-light);
+  color: var(--color-text-black);
+  font-family: var(--font-sans);
+}
