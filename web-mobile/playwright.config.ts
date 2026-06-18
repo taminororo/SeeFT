@@ -12,14 +12,20 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://localhost:3000",
-    channel: "chrome",
+    // CI: 同梱の Chromium を使う（`playwright install --with-deps chromium` で導入）。
+    // ローカル: インストール済みの Google Chrome（channel: "chrome"）を使う。
+    ...(process.env.CI ? {} : { channel: "chrome" }),
     headless: true,
     viewport: { width: 390, height: 844 },
   },
-  webServer: {
-    command: "npm run dev",
-    url: "http://localhost:3000",
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
+  // CI では dev サーバを自前で起動し :3000 を待ってから実行するため webServer は定義しない。
+  // ローカルでは既に起動済みの dev サーバを再利用する（なければ起動する）。
+  webServer: process.env.CI
+    ? undefined
+    : {
+        command: "npm run dev",
+        url: "http://localhost:3000",
+        reuseExistingServer: true,
+        timeout: 120_000,
+      },
 });
