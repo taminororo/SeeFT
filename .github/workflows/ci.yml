@@ -1,0 +1,144 @@
+name: web-mobile CI
+
+on:
+  pull_request:
+    paths:
+      - "web-mobile/**"
+  push:
+    branches:
+      - spike/web-mobile-nextjs
+      - develop
+    paths:
+      - "web-mobile/**"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # unit: the required PR gate. No Docker, no DB, no browser — just lint, type
+  # check and vitest. Mirrors exactly what already passes locally on Node 22,
+  # so it must stay fast and reliably green.
+  # ---------------------------------------------------------------------------
+  unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web-mobile/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      # tsconfig.json sets noEmit:true + strict:true, so this is the typecheck
+      # (there is no dedicated "typecheck" npm script).
+      - run: npx tsc --noEmit
+
+      - run: npm run test
+
+  # ---------------------------------------------------------------------------
+  # e2e: PROVISIONAL — must NOT block PRs until it is stabilized.
+  #
+  # continue-on-error keeps this job non-blocking: it brings up the full Go
+  # api + Postgres via docker compose (cold golang:latest build can take
+  # minutes) and runs Playwright. It is intentionally allowed to fail for now;
+  # remove continue-on-error and promote it to a required check once it is
+  # proven reliable.
+  # ---------------------------------------------------------------------------
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web-mobile/package-lock.json
+
+      # Bring up only db + api (compose file is at the repo root). NOT the full
+      # stack: the `admin` service also binds host :3000 and would collide with
+      # the Next dev server. Build explicitly here instead of `make up-api`,
+      # whose fixed `sleep 15` races the api build.
+      - name: Start db and api
+        run: docker compose up -d --build db api
+
+      # "up" != "ready": start.sh runs `go mod tidy && air`, so poll the api on
+      # :1234 until it actually answers. Generous timeout for the cold Go build.
+      - name: Wait for api on :1234
+        run: |
+          timeout 600 bash -c 'until curl -fsS http://localhost:1234/ >/dev/null 2>&1; do echo "waiting for api on :1234..."; sleep 5; done'
+
+      # Seeds are NOT auto-loaded by the compose init volume, so load them by
+      # hand. Order is load-bearing: all create*.sql first, then seed.sql, then
+      # seed_shifts.sql (its INSERTs have FKs into rows seed.sql creates). A
+      # naive `*.sql` glob is wrong because "seed_shifts.sql" sorts before
+      # "seed.sql" — hence the explicit two seed steps. ON_ERROR_STOP makes a
+      # bad load fail the job loudly instead of surfacing as a confusing 404.
+      - name: Load SQL seeds
+        run: |
+          DB_DIR=postgresql/db
+          for f in $(ls "$DB_DIR"/create*.sql | sort); do
+            echo "Loading $f"
+            docker exec -i nutfes-seeft-db psql -U seeft -d seeft_db -v ON_ERROR_STOP=1 < "$f"
+          done
+          echo "Loading $DB_DIR/seed.sql"
+          docker exec -i nutfes-seeft-db psql -U seeft -d seeft_db -v ON_ERROR_STOP=1 < "$DB_DIR/seed.sql"
+          echo "Loading $DB_DIR/seed_shifts.sql"
+          docker exec -i nutfes-seeft-db psql -U seeft -d seeft_db -v ON_ERROR_STOP=1 < "$DB_DIR/seed_shifts.sql"
+
+      - name: Install web-mobile deps
+        working-directory: web-mobile
+        run: npm ci
+
+      # Bundled Chromium + apt deps. Restricted to chromium so it does not also
+      # download firefox/webkit. Under CI the Playwright config drops
+      # channel:"chrome" and falls back to this browser.
+      - name: Install Playwright chromium
+        working-directory: web-mobile
+        run: npx playwright install --with-deps chromium
+
+      # Start next dev in the background and gate on :3000 before running specs.
+      # NEXT_PUBLIC_API_BASE_URL defaults to http://localhost:1234 already; set
+      # it explicitly for clarity.
+      - name: Start Next dev server
+        working-directory: web-mobile
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:1234
+        run: |
+          npm run dev > /tmp/next-dev.log 2>&1 &
+          timeout 120 bash -c 'until curl -fsS http://localhost:3000/ >/dev/null 2>&1; do echo "waiting for next dev on :3000..."; sleep 2; done'
+
+      - name: Run Playwright e2e
+        working-directory: web-mobile
+        run: npm run test:e2e
+
+      # Diagnostics for the inevitable early flakes.
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== docker compose logs api ==="
+          docker compose logs api || true
+          echo "=== next dev log ==="
+          cat /tmp/next-dev.log || true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web-mobile/playwright-report
+            /tmp/next-dev.log
+          if-no-files-found: ignore
+
+      # Never leak containers/volumes from a failed run.
+      - name: Tear down docker compose
+        if: always()
+        run: docker compose down -v
