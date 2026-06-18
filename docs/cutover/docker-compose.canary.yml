@@ -1,0 +1,59 @@
+# =============================================================================
+# 【サンプル】カナリア用 compose override（本番 compose には未接続）
+# =============================================================================
+#
+# これは「並走/カナリア検証」をやりたくなったときの参考例であり、ライブの
+# docker-compose.prod.yml には組み込まれていない。実際に使う場合は、本番ホスト
+# 側で web/prod の cloudflare tunnel に seeft-canary 用のホスト名と DNS を別途
+# 設定したうえで、下記を override として重ねる想定:
+#
+#     docker compose \
+#       -f docker-compose.prod.yml \
+#       -f docs/cutover/docker-compose.canary.yml \
+#       up -d web-mobile-canary
+#
+# ポイント:
+#   - 既存の mobile サービス（Flutter+python, container_name: nutfes-seeft-mobile,
+#     ports 45029:45029）はそのまま primary として残す。本番トラフィックは
+#     一切触らない。
+#   - カナリアは「別サービス・別コンテナ名・別ホスト公開ポート(45030)」で立て、
+#     コンテナ内部は web-mobile/Dockerfile の ENV PORT=45029 のまま動かす
+#     （45030:45029 で外側だけずらす）。
+#   - 検証アクセスは cloudflare tunnel 側に別ホスト名（例: seeft-canary.nutfes.net）
+#     を生やし、その ingress を http://web-mobile-canary:45029 に向ける。
+#     ※ tunnel 設定と資格情報（web/prod/）はこの fork に含まれず OPS 所有。
+#
+# このファイル自体は example。develop へマージしても本番挙動には影響しない。
+# =============================================================================
+
+version: "3"
+
+services:
+  # --- カナリア（Next.js web-mobile）。Flutter の mobile サービスとは別物 ---
+  web-mobile-canary:
+    # 本番候補イメージ。web-mobile/Dockerfile（multi-stage / standalone /
+    # ENV PORT=45029 / CMD ["node","server.js"]）をそのままビルドする。
+    build: "./web-mobile"
+    container_name: "nutfes-seeft-web-mobile-canary"
+    # 外側だけ 45030 にずらし、コンテナ内部は 45029（Dockerfile の PORT）のまま。
+    # primary の mobile(45029) と衝突しない。
+    ports: ["45030:45029"]
+    environment:
+      NEXT_PUBLIC_APP_ENV: "production"
+      # 注意: NEXT_PUBLIC_* はビルド時にバンドルへ焼き込まれる（config.ts /
+      # Dockerfile の ARG/ENV 参照）。実行時にここで上書きしても反映されない。
+      # 本番 URL を変えたい場合は build 時に --build-arg で渡すこと。
+    depends_on: ["api"]
+
+  # --- 参考: tunnel 側の対応イメージ（実体は web/prod に置く設定で、ここでは
+  #     コメントのみ）。seeft-canary.nutfes.net → web-mobile-canary:45029 ---
+  #
+  # cloudflare の ingress（web/prod/config.yml 側、OPS 所有・この fork に無し）に
+  # 例として以下のようなルートを追加するイメージ:
+  #
+  #   ingress:
+  #     - hostname: seeft-canary.nutfes.net
+  #       service: http://web-mobile-canary:45029
+  #     - hostname: seeft.nutfes.net          # 既存 primary。変更しない
+  #       service: http://mobile:45029
+  #     - service: http_status:404
